@@ -1,6 +1,27 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+## 🎥 Zero Room
 
-## Getting Started
+Zero Room is a demo application for a Zoom clone. It allows users to create and join video rooms with ease, featuring real-time chat and video functionalities.
+
+### ✨ Key Features
+
+- **🔴 Real-time Video Conferencing**: Secure and instant video calls.
+- **💬 Real-time Chat**: Integrated chat functionality with message editing and deletion.
+- **👥 User Mentions**: Mention users in chat using `@username`.
+- **📱 Responsive Design**: Mobile-first design using Tailwind CSS.
+- **⚡ Optimized Performance**: Uses Next.js server-side rendering and dynamic loading for optimal performance.
+
+## 🛠 Tech Stack
+
+- **Framework**: [Next.js](https://nextjs.org/)
+- **Frontend**: [React](https://reactjs.org/), [Tailwind CSS](https://tailwindcss.com/)
+- **WebSockets**: [Socket.IO](https://socket.io/)
+- **Video Conferencing**: [Simple Peer](https://github.com/feross/simple-peer)
+- **Icons**: [React Icons](https://react-icons.github.io/react-icons/)
+- **UUID**: [uuid](https://github.com/uuidjs/uuid)
+- **Linting**: [ESLint](https://eslint.org/)
+- **Styling**: [PostCSS](https://postcss.org/), [Autoprefixer](https://github.com/postcss/autoprefixer)
+
+## 🚀 Getting Started
 
 First, run the development server:
 
@@ -16,21 +37,7 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## 📧 Contact
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+For any inquiries, please contact us at [aliftan29@gmail.com](mailto:aliftan29@gmail.com).
