@@ -18,39 +18,60 @@ app.prepare().then(() => {
     const rooms = new Map();
     const messages = new Map();
 
+    function leaveRoom(socket, roomId) {
+        if (rooms.has(roomId)) {
+            const user = Array.from(rooms.get(roomId)).find(u => u.id === socket.id);
+            if (user) {
+                rooms.get(roomId).delete(user);
+                console.log(`User ${user.userName} left room ${roomId}`);
+                if (rooms.get(roomId).size === 0) {
+                    rooms.delete(roomId);
+                    messages.delete(roomId);
+                    console.log(`Room ${roomId} deleted as it's empty`);
+                } else {
+                    io.to(roomId).emit('user left', socket.id);
+                    io.to(roomId).emit('all users', Array.from(rooms.get(roomId)));
+                }
+            }
+        }
+        socket.leave(roomId);
+    }
+
     io.on('connection', (socket) => {
         console.log('A user connected');
 
         socket.on('join room', ({ roomId, userName }) => {
-            console.log(`User ${userName} joined room ${roomId}`);
+            console.log(`User ${userName} joining room ${roomId}`);
             socket.join(roomId);
+            
             if (!rooms.has(roomId)) {
                 rooms.set(roomId, new Set());
             }
             rooms.get(roomId).add({ id: socket.id, userName });
 
-            const usersInThisRoom = Array.from(rooms.get(roomId)).filter(user => user.id !== socket.id);
-            socket.emit('all users', usersInThisRoom);
+            const usersInRoom = Array.from(rooms.get(roomId));
+            io.to(roomId).emit('all users', usersInRoom);
 
-            socket.to(roomId).emit('user joined', { callerID: socket.id, userName });
+            socket.to(roomId).emit('user joined', { id: socket.id, userName });
 
-            // Send existing messages to the newly joined user
             if (messages.has(roomId)) {
                 console.log(`Sending chat history to user ${userName} in room ${roomId}`);
                 socket.emit('chat history', Array.from(messages.get(roomId).values()));
             }
+        });
 
-            socket.on('disconnect', () => {
-                console.log(`User ${userName} disconnected from room ${roomId}`);
-                if (rooms.has(roomId)) {
-                    rooms.get(roomId).delete({ id: socket.id, userName });
-                    if (rooms.get(roomId).size === 0) {
-                        rooms.delete(roomId);
-                        messages.delete(roomId);
-                    }
+        socket.on('leave room', ({ roomId }) => {
+            leaveRoom(socket, roomId);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('User disconnected');
+            for (const [roomId, users] of rooms.entries()) {
+                if (Array.from(users).some(user => user.id === socket.id)) {
+                    leaveRoom(socket, roomId);
+                    break;
                 }
-                socket.to(roomId).emit('user left', socket.id);
-            });
+            }
         });
 
         socket.on('sending signal', payload => {
@@ -68,9 +89,13 @@ app.prepare().then(() => {
             if (!messages.has(message.roomId)) {
                 messages.set(message.roomId, new Map());
             }
-            messages.get(message.roomId).set(message.id, message);
+            const newMessage = {
+                ...message,
+                timestamp: new Date().toISOString()
+            };
+            messages.get(message.roomId).set(message.id, newMessage);
             console.log('Broadcasting message to room:', message.roomId);
-            io.to(message.roomId).emit('chat message', message);
+            io.to(message.roomId).emit('chat message', newMessage);
         });
 
         socket.on('edit message', ({ messageId, newContent, roomId }) => {

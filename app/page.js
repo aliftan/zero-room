@@ -12,6 +12,7 @@ export default function Home() {
         <p className="text-xl text-center mb-12 text-gray-300">
           Secure, instant video conferencing for the modern world
         </p>
+        {/* add github button. link to this repo: https://github.com/aliftan/zero-room */}
 
         <div className="grid md:grid-cols-2 gap-8">
           <div className="bg-gray-800 p-8 rounded-lg shadow-lg border border-gray-700 hover:border-blue-500 transition-all duration-300">
@@ -26,8 +27,8 @@ export default function Home() {
         </div>
       </div>
 
-      <footer className="mt-16 text-center text-gray-500">
-        <p>&copy; 2024 Zero Room. All rights reserved.</p>
+      <footer className="mt-4 text-center text-gray-500">
+        <p>Crafted with passion 💖</p>
       </footer>
     </div>
   );

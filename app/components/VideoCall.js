@@ -40,7 +40,7 @@ export default function VideoCall({ roomId, userName }) {
                     peer,
                     userName: payload.userName
                 });
-                setPeers(peers => [...peers, { peer, userName: payload.userName }]);
+                setPeers(prevPeers => [...prevPeers, { peer, userName: payload.userName }]);
             });
 
             socketRef.current.on('receiving returned signal', payload => {
@@ -55,13 +55,13 @@ export default function VideoCall({ roomId, userName }) {
                 }
                 const remainingPeers = peersRef.current.filter(p => p.peerID !== userId);
                 peersRef.current = remainingPeers;
-                setPeers(peers => peers.filter(p => p.peerID !== userId));
+                setPeers(prevPeers => prevPeers.filter(p => p.peerID !== userId));
             });
         });
 
         return () => {
             socketRef.current.disconnect();
-            peers.forEach(peer => peer.peer.destroy());
+            peersRef.current.forEach(peer => peer.peer.destroy());
         };
     }, [roomId, userName]);
 
@@ -110,14 +110,19 @@ export default function VideoCall({ roomId, userName }) {
     }
 
     return (
-        <div className="p-4">
-            <div className="grid grid-cols-2 gap-4 mb-4">
-                <video playsInline muted ref={userVideo} autoPlay className="w-full rounded-lg" />
+        <div className="relative h-full">
+            <div className="grid grid-cols-2 gap-2 h-full">
+                <div className="relative">
+                    <video playsInline muted ref={userVideo} autoPlay className="w-full h-full object-cover rounded-lg" />
+                    <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
+                        You
+                    </p>
+                </div>
                 {peers.map((peer, index) => (
                     <Video key={index} peer={peer.peer} userName={peer.userName} />
                 ))}
             </div>
-            <div className="flex justify-center space-x-4">
+            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex justify-center space-x-4">
                 <button
                     onClick={toggleAudio}
                     className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} transition-colors`}
@@ -146,7 +151,7 @@ const Video = ({ peer, userName }) => {
 
     return (
         <div className="relative">
-            <video playsInline autoPlay ref={ref} className="w-full rounded-lg" />
+            <video playsInline autoPlay ref={ref} className="w-full h-full object-cover rounded-lg" />
             <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
                 {userName}
             </p>
