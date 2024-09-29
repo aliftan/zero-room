@@ -5,13 +5,17 @@ import { initSocket, getSocket } from '@/app/lib/socket';
 
 export default function VideoCall({ roomId, userName }) {
     const [peers, setPeers] = useState([]);
+    const [isMuted, setIsMuted] = useState(false);
+    const [isVideoOff, setIsVideoOff] = useState(false);
     const socketRef = useRef();
     const userVideo = useRef();
     const peersRef = useRef([]);
+    const streamRef = useRef();
 
     useEffect(() => {
         socketRef.current = initSocket();
         navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(stream => {
+            streamRef.current = stream;
             userVideo.current.srcObject = stream;
             socketRef.current.emit('join room', { roomId, userName });
 
@@ -61,6 +65,20 @@ export default function VideoCall({ roomId, userName }) {
         };
     }, [roomId, userName]);
 
+    const toggleAudio = () => {
+        if (streamRef.current) {
+            streamRef.current.getAudioTracks()[0].enabled = isMuted;
+            setIsMuted(!isMuted);
+        }
+    };
+
+    const toggleVideo = () => {
+        if (streamRef.current) {
+            streamRef.current.getVideoTracks()[0].enabled = isVideoOff;
+            setIsVideoOff(!isVideoOff);
+        }
+    };
+
     function createPeer(userToSignal, callerID, stream) {
         const peer = new Peer({
             initiator: true,
@@ -92,11 +110,27 @@ export default function VideoCall({ roomId, userName }) {
     }
 
     return (
-        <div className="grid grid-cols-2 gap-4">
-            <video playsInline muted ref={userVideo} autoPlay className="w-full" />
-            {peers.map((peer, index) => (
-                <Video key={index} peer={peer.peer} userName={peer.userName} />
-            ))}
+        <div className="p-4">
+            <div className="grid grid-cols-2 gap-4 mb-4">
+                <video playsInline muted ref={userVideo} autoPlay className="w-full rounded-lg" />
+                {peers.map((peer, index) => (
+                    <Video key={index} peer={peer.peer} userName={peer.userName} />
+                ))}
+            </div>
+            <div className="flex justify-center space-x-4">
+                <button
+                    onClick={toggleAudio}
+                    className={`px-4 py-2 rounded ${isMuted ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} transition-colors`}
+                >
+                    {isMuted ? 'Unmute' : 'Mute'}
+                </button>
+                <button
+                    onClick={toggleVideo}
+                    className={`px-4 py-2 rounded ${isVideoOff ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'} transition-colors`}
+                >
+                    {isVideoOff ? 'Turn On Video' : 'Turn Off Video'}
+                </button>
+            </div>
         </div>
     );
 }
@@ -111,9 +145,11 @@ const Video = ({ peer, userName }) => {
     }, [peer]);
 
     return (
-        <div>
-            <video playsInline autoPlay ref={ref} className="w-full" />
-            <p className="text-center">{userName}</p>
+        <div className="relative">
+            <video playsInline autoPlay ref={ref} className="w-full rounded-lg" />
+            <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
+                {userName}
+            </p>
         </div>
     );
 };
