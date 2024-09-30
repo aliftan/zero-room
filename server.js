@@ -8,8 +8,21 @@ const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+// Constants
+const MAX_USERS_PER_ROOM = 6;
+
+// Data storage
 const rooms = new Map();
 const messages = new Map();
+
+// Room management functions
+function joinRoom(socket, roomId, userName) {
+    if (!rooms.has(roomId)) {
+        rooms.set(roomId, new Set());
+    }
+    rooms.get(roomId).add({ id: socket.id, userName });
+    console.log(`User ${userName} joined room ${roomId}`);
+}
 
 function leaveRoom(socket, roomId) {
     if (rooms.has(roomId)) {
@@ -21,48 +34,73 @@ function leaveRoom(socket, roomId) {
                 rooms.delete(roomId);
                 messages.delete(roomId);
                 console.log(`Room ${roomId} deleted as it's empty`);
-            } else {
-                socket.to(roomId).emit('user left', socket.id);
-                io.to(roomId).emit('all users', Array.from(rooms.get(roomId)));
             }
         }
     }
     socket.leave(roomId);
 }
 
-app.prepare().then(() => {
-    const server = express();
-    const httpServer = http.createServer(server);
-    const io = new Server(httpServer, {
-        path: '/api/socketio',
-        cors: {
-            origin: "*",
-            methods: ["GET", "POST"]
-        }
-    });
+// Message management functions
+function addMessage(message) {
+    if (!messages.has(message.roomId)) {
+        messages.set(message.roomId, new Map());
+    }
+    const newMessage = {
+        ...message,
+        timestamp: new Date().toISOString()
+    };
+    messages.get(message.roomId).set(message.id, newMessage);
+    return newMessage;
+}
 
+function editMessage(messageId, newContent, roomId) {
+    if (messages.has(roomId) && messages.get(roomId).has(messageId)) {
+        const message = messages.get(roomId).get(messageId);
+        message.message = newContent;
+        message.edited = true;
+        messages.get(roomId).set(messageId, message);
+        return message;
+    }
+    return null;
+}
+
+function deleteMessage(messageId, roomId) {
+    if (messages.has(roomId) && messages.get(roomId).has(messageId)) {
+        messages.get(roomId).delete(messageId);
+        return true;
+    }
+    return false;
+}
+
+// Socket event handlers
+function setupSocketHandlers(io) {
     io.on('connection', (socket) => {
         console.log('A user connected');
 
         socket.on('check room', (roomId, callback) => {
-            console.log('Checking room:', roomId);
-            const roomExists = rooms.has(roomId);
-            console.log('Room exists:', roomExists);
-            callback(roomExists);
-        });
+            console.log(`Checking room: ${roomId}`);  // Add this line
+            const room = io.sockets.adapter.rooms.get(roomId);
+            const roomSize = room ? room.size : 0;
+            const roomExists = roomSize > 0;
+            const canJoin = roomSize < MAX_USERS_PER_ROOM;
+            console.log(`Room ${roomId} status: exists=${roomExists}, canJoin=${canJoin}`);  // Add this line
+            callback({ exists: roomExists, canJoin: canJoin });
+        });        
 
-        socket.on('join room', ({ roomId, userName }) => {
-            console.log(`User ${userName} joining room ${roomId}`);
-            socket.join(roomId);
+        socket.on('join room', ({ roomId, userName, roomName }) => {
+            const room = io.sockets.adapter.rooms.get(roomId);
+            const roomSize = room ? room.size : 0;
 
-            if (!rooms.has(roomId)) {
-                rooms.set(roomId, new Set());
+            if (roomSize >= MAX_USERS_PER_ROOM) {
+                socket.emit('room full');
+                return;
             }
-            rooms.get(roomId).add({ id: socket.id, userName });
+
+            socket.join(roomId);
+            joinRoom(socket, roomId, userName);
 
             const usersInRoom = Array.from(rooms.get(roomId));
             io.to(roomId).emit('all users', usersInRoom);
-
             socket.to(roomId).emit('user joined', { id: socket.id, userName });
 
             if (messages.has(roomId)) {
@@ -74,6 +112,8 @@ app.prepare().then(() => {
         socket.on('leave room', ({ roomId }) => {
             console.log(`User leaving room ${roomId}`);
             leaveRoom(socket, roomId);
+            socket.to(roomId).emit('user left', socket.id);
+            io.to(roomId).emit('all users', Array.from(rooms.get(roomId) || []));
         });
 
         socket.on('disconnect', () => {
@@ -81,6 +121,8 @@ app.prepare().then(() => {
             for (const [roomId, users] of rooms.entries()) {
                 if (Array.from(users).some(user => user.id === socket.id)) {
                     leaveRoom(socket, roomId);
+                    socket.to(roomId).emit('user left', socket.id);
+                    io.to(roomId).emit('all users', Array.from(rooms.get(roomId) || []));
                     break;
                 }
             }
@@ -98,37 +140,40 @@ app.prepare().then(() => {
 
         socket.on('chat message', (message) => {
             console.log('Received chat message:', message);
-            if (!messages.has(message.roomId)) {
-                messages.set(message.roomId, new Map());
-            }
-            const newMessage = {
-                ...message,
-                timestamp: new Date().toISOString()
-            };
-            messages.get(message.roomId).set(message.id, newMessage);
-            console.log('Broadcasting message to room:', message.roomId);
+            const newMessage = addMessage(message);
             io.to(message.roomId).emit('chat message', newMessage);
         });
 
         socket.on('edit message', ({ messageId, newContent, roomId }) => {
             console.log(`Editing message ${messageId} in room ${roomId}`);
-            if (messages.has(roomId) && messages.get(roomId).has(messageId)) {
-                const message = messages.get(roomId).get(messageId);
-                message.message = newContent;
-                message.edited = true;
-                messages.get(roomId).set(messageId, message);
-                io.to(roomId).emit('message edited', message);
+            const editedMessage = editMessage(messageId, newContent, roomId);
+            if (editedMessage) {
+                io.to(roomId).emit('message edited', editedMessage);
             }
         });
 
         socket.on('delete message', ({ messageId, roomId }) => {
             console.log(`Deleting message ${messageId} from room ${roomId}`);
-            if (messages.has(roomId) && messages.get(roomId).has(messageId)) {
-                messages.get(roomId).delete(messageId);
+            if (deleteMessage(messageId, roomId)) {
                 io.to(roomId).emit('message deleted', messageId);
             }
         });
     });
+}
+
+// Server setup
+app.prepare().then(() => {
+    const server = express();
+    const httpServer = http.createServer(server);
+    const io = new Server(httpServer, {
+        path: '/api/socketio',
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"]
+        }
+    });
+
+    setupSocketHandlers(io);
 
     server.all('*', (req, res) => {
         return handle(req, res);

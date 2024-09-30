@@ -4,7 +4,7 @@ import { useSearchParams, useRouter } from 'next/navigation';
 import VideoCall from '@/app/components/VideoCall';
 import Chat from '@/app/components/Chat';
 import { initSocket } from '@/app/lib/socket';
-import { FaCopy, FaSignOutAlt, FaComments } from 'react-icons/fa';
+import { FaCopy, FaSignOutAlt, FaComments, FaArrowLeft, FaBackward, FaAngleLeft } from 'react-icons/fa';
 
 export default function Room({ params }) {
     const searchParams = useSearchParams();
@@ -197,7 +197,7 @@ export default function Room({ params }) {
                         className="absolute right-0 top-1/2 transform -translate-y-1/2 bg-gray-700 p-2 rounded-l-md hover:bg-gray-600 transition-colors"
                         aria-label={isChatOpen ? "Close chat" : "Open chat"}
                     >
-                        <FaComments className={`text-xl ${isChatOpen ? 'rotate-180' : ''} transition-transform`} />
+                        <FaAngleLeft className={`text-xl ${isChatOpen ? 'rotate-180' : ''} transition-transform`} />
                     </button>
                 </div>
             </div>

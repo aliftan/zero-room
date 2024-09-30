@@ -3,17 +3,23 @@ import { io } from 'socket.io-client';
 
 let socket;
 
+const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3000';
+const SOCKET_PATH = process.env.NEXT_PUBLIC_SOCKET_PATH || '/api/socketio';
+const ROOM_CHECK_TIMEOUT = 5000; // 5 seconds
+
 async function getSocket() {
-    if (!socket) {
-        socket = io('http://localhost:3000', {
-            path: '/api/socketio',
+    if (!socket || !socket.connected) {
+        socket = io(SOCKET_SERVER_URL, {
+            path: SOCKET_PATH,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
         });
 
-        await new Promise((resolve) => {
-            socket.on('connect', () => {
-                console.log('Socket connected');
-                resolve();
-            });
+        await new Promise((resolve, reject) => {
+            socket.on('connect', resolve);
+            socket.on('connect_error', reject);
+            socket.on('error', reject);
         });
     }
     return socket;
@@ -28,27 +34,20 @@ export async function GET(request) {
     }
 
     try {
-        console.log('Attempting to get socket');
         const socket = await getSocket();
-        console.log('Socket retrieved successfully');
-
-        const exists = await new Promise((resolve, reject) => {
-            console.log('Emitting check room event');
-            socket.emit('check room', roomId, (exists) => {
-                console.log('Received response from check room event:', exists);
-                resolve(exists);
+        const roomStatus = await new Promise((resolve, reject) => {
+            socket.emit('check room', roomId, (response) => {
+                console.log('Room check response:', response);  // Add this line
+                resolve(response);
             });
 
-            // Add a timeout in case the server doesn't respond
-            setTimeout(() => {
-                reject(new Error('Timeout waiting for room check response'));
-            }, 5000);
+            // Set a timeout in case the server doesn't respond
+            setTimeout(() => reject(new Error('Timeout checking room status')), ROOM_CHECK_TIMEOUT);
         });
 
-        console.log('Room exists:', exists);
-        return NextResponse.json({ exists });
+        return NextResponse.json(roomStatus);
     } catch (error) {
-        console.error('Detailed error in check room route:', error);
-        return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+        console.error('Detailed error checking room status:', error);  // Modified this line
+        return NextResponse.json({ error: error.message || 'Failed to check room status' }, { status: 500 });
     }
 }

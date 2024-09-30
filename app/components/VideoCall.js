@@ -2,10 +2,19 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Peer from 'simple-peer';
 
+let idCounter = 0;
+const generateUniqueId = () => {
+    idCounter += 1;
+    return `peer-${idCounter}`;
+};
+
+const MAX_PEERS = 6;
+
 export default function VideoCall({ roomId, userName, socket, connectionStatus }) {
     const [peers, setPeers] = useState([]);
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
+    const [error, setError] = useState(null);
     const userVideo = useRef();
     const peersRef = useRef([]);
     const streamRef = useRef();
@@ -18,16 +27,16 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
         });
 
         peer.on('signal', signal => {
-            socket.emit('sending signal', { userToSignal, callerID, signal });
+            socket.emit('sending signal', { userToSignal, callerID, signal, userName });
         });
 
         peer.on('error', error => {
-            console.error('Peer error:', error);
-            peer.destroy();
+            console.error('Peer error in createPeer:', error);
+            removePeer(callerID);
         });
 
         return peer;
-    }, [socket]);
+    }, [socket, userName]);
 
     const addPeer = useCallback((incomingSignal, callerID, stream) => {
         const peer = new Peer({
@@ -41,14 +50,23 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
         });
 
         peer.on('error', error => {
-            console.error('Peer error:', error);
-            peer.destroy();
+            console.error('Peer error in addPeer:', error);
+            removePeer(callerID);
         });
 
         peer.signal(incomingSignal);
 
         return peer;
     }, [socket]);
+
+    const removePeer = useCallback((peerId) => {
+        setPeers(prevPeers => prevPeers.filter(p => p.peerID !== peerId));
+        peersRef.current = peersRef.current.filter(p => p.peerID !== peerId);
+        const peerToRemove = peersRef.current.find(p => p.peerID === peerId);
+        if (peerToRemove && peerToRemove.peer) {
+            peerToRemove.peer.destroy();
+        }
+    }, []);
 
     useEffect(() => {
         if (connectionStatus !== 'connected') return;
@@ -61,48 +79,59 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                     userVideo.current.srcObject = stream;
                 }
 
+                socket.emit('join room', { roomId, userName });
+
                 socket.on('all users', users => {
                     const peers = [];
                     users.forEach(user => {
-                        const peer = createPeer(user.id, socket.id, stream);
-                        peersRef.current.push({
-                            peerID: user.id,
-                            peer,
-                            userName: user.userName
-                        });
-                        peers.push({ peer, userName: user.userName });
+                        if (peers.length < MAX_PEERS - 1) {
+                            const peer = createPeer(user.id, socket.id, stream);
+                            const peerObj = {
+                                peerID: user.id,
+                                peer,
+                                userName: user.userName,
+                                uniqueId: generateUniqueId()
+                            };
+                            peersRef.current.push(peerObj);
+                            peers.push(peerObj);
+                        }
                     });
                     setPeers(peers);
                 });
 
                 socket.on('user joined', payload => {
-                    const peer = addPeer(payload.signal, payload.callerID, stream);
-                    peersRef.current.push({
-                        peerID: payload.callerID,
-                        peer,
-                        userName: payload.userName
-                    });
-                    setPeers(prevPeers => [...prevPeers, { peer, userName: payload.userName }]);
+                    if (peersRef.current.length < MAX_PEERS - 1) {
+                        const peer = addPeer(payload.signal, payload.callerID, stream);
+                        const peerObj = {
+                            peerID: payload.callerID,
+                            peer,
+                            userName: payload.userName,
+                            uniqueId: generateUniqueId()
+                        };
+                        peersRef.current.push(peerObj);
+                        setPeers(prevPeers => [...prevPeers, peerObj]);
+                    } else {
+                        console.warn('Maximum number of peers reached. Cannot add new peer.');
+                    }
                 });
 
                 socket.on('receiving returned signal', payload => {
                     const item = peersRef.current.find(p => p.peerID === payload.id);
-                    if (item && !item.peer.destroyed) {
+                    if (item && item.peer) {
                         item.peer.signal(payload.signal);
                     }
                 });
 
                 socket.on('user left', userId => {
-                    const peerObj = peersRef.current.find(p => p.peerID === userId);
-                    if (peerObj) {
-                        peerObj.peer.destroy();
-                    }
-                    const remainingPeers = peersRef.current.filter(p => p.peerID !== userId);
-                    peersRef.current = remainingPeers;
-                    setPeers(prevPeers => prevPeers.filter(p => p.peer.peerID !== userId));
+                    removePeer(userId);
+                });
+
+                socket.on('room full', () => {
+                    setError('The room is full. Cannot join.');
                 });
             } catch (error) {
                 console.error('Error accessing media devices:', error);
+                setError('Unable to access camera or microphone');
             }
         };
 
@@ -110,58 +139,51 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
 
         return () => {
             streamRef.current?.getTracks().forEach(track => track.stop());
-            peersRef.current.forEach(({ peer }) => {
-                if (peer && !peer.destroyed) {
-                    peer.destroy();
-                }
-            });
+            peersRef.current.forEach(({ peer }) => peer.destroy());
+            socket.off('all users');
+            socket.off('user joined');
+            socket.off('receiving returned signal');
+            socket.off('user left');
+            socket.off('room full');
+            socket.emit('leave room', { roomId, userName });
         };
-    }, [socket, roomId, userName, createPeer, addPeer, connectionStatus]);
+    }, [socket, roomId, userName, createPeer, addPeer, removePeer, connectionStatus]);
 
     useEffect(() => {
-        if (connectionStatus !== 'connected' && streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.enabled = false);
-        } else if (connectionStatus === 'connected' && streamRef.current) {
+        if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => {
-                if (track.kind === 'audio') track.enabled = !isMuted;
-                if (track.kind === 'video') track.enabled = !isVideoOff;
+                if (track.kind === 'audio') track.enabled = connectionStatus === 'connected' && !isMuted;
+                if (track.kind === 'video') track.enabled = connectionStatus === 'connected' && !isVideoOff;
             });
         }
     }, [connectionStatus, isMuted, isVideoOff]);
 
     const toggleAudio = useCallback(() => {
-        if (streamRef.current) {
-            const audioTrack = streamRef.current.getAudioTracks()[0];
-            if (audioTrack) {
-                audioTrack.enabled = !audioTrack.enabled;
-                setIsMuted(!audioTrack.enabled);
-            }
-        }
+        setIsMuted(prev => !prev);
     }, []);
 
     const toggleVideo = useCallback(() => {
-        if (streamRef.current) {
-            const videoTrack = streamRef.current.getVideoTracks()[0];
-            if (videoTrack) {
-                videoTrack.enabled = !videoTrack.enabled;
-                setIsVideoOff(!videoTrack.enabled);
-            }
-        }
+        setIsVideoOff(prev => !prev);
     }, []);
+
+    if (error) {
+        return <div className="text-red-500">{error}</div>;
+    }
 
     return (
         <div className="relative h-full">
-            <div className="grid grid-cols-2 gap-2 h-full">
+            <div className={`grid gap-2 h-full ${peers.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
                 <div className="relative">
                     <video playsInline muted ref={userVideo} autoPlay className="w-full h-full object-cover rounded-lg" />
                     <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
                         You {connectionStatus !== 'connected' && '(Disconnected)'}
                     </p>
                 </div>
-                {peers.map((peer, index) => (
-                    <Video key={peer.peer.peerID} peer={peer.peer} userName={peer.userName} />
+                {peers.map((peerData) => (
+                    <Video key={peerData.uniqueId} peer={peerData.peer} userName={peerData.userName} />
                 ))}
             </div>
+
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex justify-center space-x-4">
                 <button
                     onClick={toggleAudio}
@@ -182,22 +204,13 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
     );
 }
 
-const Video = React.memo(({ peer, userName }) => {
+const Video = ({ peer, userName }) => {
     const ref = useRef();
 
     useEffect(() => {
-        if (peer) {
-            peer.on('stream', stream => {
-                if (ref.current) {
-                    ref.current.srcObject = stream;
-                }
-            });
-        }
-        return () => {
-            if (peer && !peer.destroyed) {
-                peer.destroy();
-            }
-        };
+        peer.on('stream', stream => {
+            ref.current.srcObject = stream;
+        });
     }, [peer]);
 
     return (
@@ -208,6 +221,4 @@ const Video = React.memo(({ peer, userName }) => {
             </p>
         </div>
     );
-});
-
-Video.displayName = 'Video';
+};

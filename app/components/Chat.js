@@ -8,6 +8,7 @@ export default function Chat({ roomId, userName, socket }) {
     const [replyingTo, setReplyingTo] = useState(null);
     const [editingMessage, setEditingMessage] = useState(null);
     const chatContainerRef = useRef();
+    const inputRef = useRef();
 
     useEffect(() => {
         if (!socket) return;
@@ -42,6 +43,12 @@ export default function Chat({ roomId, userName, socket }) {
         chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }, [messages]);
 
+    useEffect(() => {
+        if (replyingTo) {
+            inputRef.current.focus();
+        }
+    }, [replyingTo]);
+
     const sendMessage = (e) => {
         e.preventDefault();
         if (inputMessage.trim() && socket) {
@@ -59,6 +66,13 @@ export default function Chat({ roomId, userName, socket }) {
 
             setInputMessage('');
             setReplyingTo(null);
+        }
+    };
+
+    const handleKeyPress = (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage(e);
         }
     };
 
@@ -86,34 +100,49 @@ export default function Chat({ roomId, userName, socket }) {
         return isNaN(date.getTime()) ? '' : date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+    const handleReply = (msg) => {
+        setReplyingTo(msg);
+        inputRef.current.focus();
+    };
+
+    const renderMessage = (msg) => {
+        const isOwnMessage = msg.userName === userName;
+        const replyToMessage = messages.find(m => m.id === msg.replyTo);
+    
+        return (
+            <div key={msg.id} className="mb-4">
+                <div className={`w-full rounded-lg ${isOwnMessage ? 'bg-blue-600' : 'bg-gray-700'}`}>
+                    {replyToMessage && (
+                        <div className="px-4 py-2 bg-opacity-50 bg-gray-600 rounded-t-lg border-b border-gray-500">
+                            <p className="text-xs text-gray-300">Replying to {replyToMessage.userName}</p>
+                            <p className="text-sm text-gray-200 truncate">{replyToMessage.message}</p>
+                        </div>
+                    )}
+                    <div className="px-4 py-2">
+                        <div className="flex justify-between items-center mb-1">
+                            <p className="font-bold text-sm">{msg.userName}</p>
+                            <p className="text-xs text-gray-300">{formatTimestamp(msg.timestamp)}</p>
+                        </div>
+                        <p className="break-words">{msg.message}</p>
+                        <div className="mt-2 text-xs space-x-2 flex justify-end">
+                            {isOwnMessage && (
+                                <>
+                                    <button onClick={() => setEditingMessage(msg)} className="p-1 hover:bg-gray-600 rounded"><FaEdit /></button>
+                                    <button onClick={() => deleteMessage(msg.id)} className="p-1 hover:bg-gray-600 rounded"><FaTrash /></button>
+                                </>
+                            )}
+                            <button onClick={() => handleReply(msg)} className="p-1 hover:bg-gray-600 rounded"><FaReply /></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    };        
+
     return (
         <div className="flex flex-col h-full bg-gray-900">
             <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={chatContainerRef}>
-                {messages.map((msg) => (
-                    <div key={msg.id} className={`flex ${msg.userName === userName ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`w-full px-4 py-2 rounded-lg ${msg.userName === userName ? 'bg-gray-700' : 'bg-gray-800'}`}>
-                            <div className="flex justify-between items-center mb-1">
-                                <p className="font-bold text-sm">{msg.userName}</p>
-                                <p className="text-xs text-gray-400">{formatTimestamp(msg.timestamp)}</p>
-                            </div>
-                            {msg.replyTo && (
-                                <p className="text-xs italic bg-gray-600 p-1 rounded mb-1">
-                                    Replying to: {messages.find(m => m.id === msg.replyTo)?.message}
-                                </p>
-                            )}
-                            <p className="break-words">{msg.message}</p>
-                            <div className="mt-2 text-xs space-x-2 flex justify-end">
-                                {msg.userName === userName && (
-                                    <>
-                                        <button onClick={() => setEditingMessage(msg)} className="p-1 hover:bg-gray-600 rounded"><FaEdit /></button>
-                                        <button onClick={() => deleteMessage(msg.id)} className="p-1 hover:bg-gray-600 rounded"><FaTrash /></button>
-                                    </>
-                                )}
-                                <button onClick={() => setReplyingTo(msg)} className="p-1 hover:bg-gray-600 rounded"><FaReply /></button>
-                            </div>
-                        </div>
-                    </div>
-                ))}
+                {messages.map(renderMessage)}
             </div>
 
             <form onSubmit={sendMessage} className="p-4 bg-gray-800">
@@ -140,6 +169,8 @@ export default function Chat({ roomId, userName, socket }) {
                         type="text"
                         value={inputMessage}
                         onChange={(e) => setInputMessage(e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        ref={inputRef}
                         className="flex-1 bg-gray-700 text-white px-4 py-2 rounded-l focus:outline-none focus:ring-2 focus:ring-blue-500"
                         placeholder="Type a message... (Use @ to mention)"
                     />

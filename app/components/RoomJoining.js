@@ -8,7 +8,7 @@ export default function RoomJoining() {
     const [userName, setUserName] = useState('');
     const [errors, setErrors] = useState({ roomId: '', userName: '', general: '' });
     const [isLoading, setIsLoading] = useState(false);
-    const [isSocketReady, setIsSocketReady] = useState(false);
+    const [socket, setSocket] = useState(null);
     const router = useRouter();
 
     useEffect(() => {
@@ -16,9 +16,9 @@ export default function RoomJoining() {
 
         const setupSocket = async () => {
             try {
-                await initSocket();
+                const initializedSocket = await initSocket();
                 if (isMounted) {
-                    setIsSocketReady(true);
+                    setSocket(initializedSocket);
                     console.log("Socket initialized successfully");
                 }
             } catch (error) {
@@ -43,10 +43,16 @@ export default function RoomJoining() {
         if (!roomId.trim()) {
             newErrors.roomId = 'Room ID is required';
             isValid = false;
+        } else if (roomId.length < 4) {
+            newErrors.roomId = 'Room ID must be at least 4 characters long';
+            isValid = false;
         }
 
         if (!userName.trim()) {
             newErrors.userName = 'Your name is required';
+            isValid = false;
+        } else if (userName.length < 2) {
+            newErrors.userName = 'Name must be at least 2 characters long';
             isValid = false;
         }
 
@@ -54,42 +60,44 @@ export default function RoomJoining() {
         return isValid;
     }, [roomId, userName]);
 
-    const checkRoomExists = useCallback(async (roomId) => {
-        if (!isSocketReady) {
-            throw new Error('Socket not ready. Please try again in a moment.');
-        }
-        const socket = getSocket();
+    const checkRoomExists = useCallback((roomId) => {
         return new Promise((resolve, reject) => {
+            if (!socket) {
+                reject(new Error('Socket not initialized. Please try again in a moment.'));
+                return;
+            }
+
             const timeout = setTimeout(() => {
                 reject(new Error('Timeout waiting for room check response'));
             }, 5000);
 
-            socket.emit('check room', roomId, (exists) => {
+            socket.emit('check room', roomId, (response) => {
                 clearTimeout(timeout);
-                resolve(exists);
+                resolve(response);
             });
         });
-    }, [isSocketReady]);
+    }, [socket]);
 
     const joinRoom = useCallback(async () => {
         if (validateInputs()) {
             setIsLoading(true);
             setErrors(prev => ({ ...prev, general: '' }));
             try {
-                const roomExists = await checkRoomExists(roomId);
-                if (roomExists) {
+                const exists = await checkRoomExists(roomId);
+
+                if (exists) {
                     router.push(`/room/${roomId}?name=${encodeURIComponent(userName)}`);
                 } else {
                     setErrors(prev => ({ ...prev, general: 'This room does not exist. Please check the room ID and try again.' }));
                 }
             } catch (error) {
-                console.error('Error checking room:', error);
+                console.error('Detailed error checking room:', error);
                 setErrors(prev => ({ ...prev, general: `Error: ${error.message}. Please try again.` }));
             } finally {
                 setIsLoading(false);
             }
         }
-    }, [roomId, userName, validateInputs, checkRoomExists, router]);
+    }, [roomId, userName, validateInputs, router, checkRoomExists]);
 
     const handleKeyPress = useCallback((e) => {
         if (e.key === 'Enter') {
