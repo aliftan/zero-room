@@ -1,25 +1,23 @@
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
-import { initSocket, getSocket } from '@/app/lib/socket';
 import { FaEdit, FaTrash, FaReply } from 'react-icons/fa';
 
-export default function Chat({ roomId, userName }) {
+export default function Chat({ roomId, userName, socket }) {
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
     const [replyingTo, setReplyingTo] = useState(null);
     const [editingMessage, setEditingMessage] = useState(null);
-    const socketRef = useRef();
     const chatContainerRef = useRef();
 
     useEffect(() => {
-        socketRef.current = initSocket();
-        socketRef.current.emit('join chat', { roomId, userName });
+        if (!socket) return;
 
-        socketRef.current.on('chat message', message => {
+        socket.on('chat message', message => {
+            console.log('Received chat message:', message);
             setMessages(prevMessages => [...prevMessages, message]);
         });
 
-        socketRef.current.on('message edited', editedMessage => {
+        socket.on('message edited', editedMessage => {
             setMessages(prevMessages =>
                 prevMessages.map(msg =>
                     msg.id === editedMessage.id ? editedMessage : msg
@@ -27,26 +25,26 @@ export default function Chat({ roomId, userName }) {
             );
         });
 
-        socketRef.current.on('message deleted', deletedMessageId => {
+        socket.on('message deleted', deletedMessageId => {
             setMessages(prevMessages =>
                 prevMessages.filter(msg => msg.id !== deletedMessageId)
             );
         });
 
         return () => {
-            socketRef.current.off('chat message');
-            socketRef.current.off('message edited');
-            socketRef.current.off('message deleted');
+            socket.off('chat message');
+            socket.off('message edited');
+            socket.off('message deleted');
         };
-    }, [roomId, userName]);
+    }, [socket]);
 
     useEffect(() => {
-        console.log('Messages state updated:', messages);
+        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }, [messages]);
 
     const sendMessage = (e) => {
         e.preventDefault();
-        if (inputMessage.trim()) {
+        if (inputMessage.trim() && socket) {
             const newMessage = {
                 id: Date.now().toString(),
                 roomId,
@@ -54,39 +52,32 @@ export default function Chat({ roomId, userName }) {
                 message: inputMessage,
                 replyTo: replyingTo ? replyingTo.id : null,
                 mentions: extractMentions(inputMessage),
+                timestamp: new Date().toISOString()
             };
             console.log('Sending message:', newMessage);
-            socketRef.current.emit('chat message', newMessage);
+            socket.emit('chat message', newMessage);
 
-            setMessages(prevMessages => [...prevMessages, newMessage]);
             setInputMessage('');
             setReplyingTo(null);
         }
     };
 
     const editMessage = (messageId, newContent) => {
-        console.log('Editing message:', messageId, newContent);
-        socketRef.current.emit('edit message', { messageId, newContent, roomId });
-        setEditingMessage(null);
+        if (socket) {
+            socket.emit('edit message', { messageId, newContent, roomId });
+            setEditingMessage(null);
+        }
     };
 
     const deleteMessage = (messageId) => {
-        console.log('Deleting message:', messageId);
-        socketRef.current.emit('delete message', { messageId, roomId });
+        if (socket) {
+            socket.emit('delete message', { messageId, roomId });
+        }
     };
 
     const extractMentions = (message) => {
         const mentions = message.match(/@(\w+)/g);
         return mentions ? mentions.map(m => m.slice(1)) : [];
-    };
-
-    const formatMessage = (message) => {
-        return message.split(' ').map((word, index) => {
-            if (word.startsWith('@')) {
-                return <span key={index} className="text-blue-400">{word}</span>;
-            }
-            return word + ' ';
-        });
     };
 
     const formatTimestamp = (timestamp) => {
@@ -97,7 +88,6 @@ export default function Chat({ roomId, userName }) {
 
     return (
         <div className="flex flex-col h-full bg-gray-900">
-
             <div className="flex-1 overflow-y-auto p-4 space-y-4" ref={chatContainerRef}>
                 {messages.map((msg) => (
                     <div key={msg.id} className={`flex ${msg.userName === userName ? 'justify-end' : 'justify-start'}`}>
@@ -161,7 +151,6 @@ export default function Chat({ roomId, userName }) {
                     </button>
                 </div>
             </form>
-
         </div>
     );
 }

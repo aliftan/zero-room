@@ -8,42 +8,53 @@ const dev = process.env.NODE_ENV !== 'production';
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+const rooms = new Map();
+const messages = new Map();
+
+function leaveRoom(socket, roomId) {
+    if (rooms.has(roomId)) {
+        const user = Array.from(rooms.get(roomId)).find(u => u.id === socket.id);
+        if (user) {
+            rooms.get(roomId).delete(user);
+            console.log(`User ${user.userName} left room ${roomId}`);
+            if (rooms.get(roomId).size === 0) {
+                rooms.delete(roomId);
+                messages.delete(roomId);
+                console.log(`Room ${roomId} deleted as it's empty`);
+            } else {
+                socket.to(roomId).emit('user left', socket.id);
+                io.to(roomId).emit('all users', Array.from(rooms.get(roomId)));
+            }
+        }
+    }
+    socket.leave(roomId);
+}
+
 app.prepare().then(() => {
     const server = express();
     const httpServer = http.createServer(server);
     const io = new Server(httpServer, {
         path: '/api/socketio',
-    });
-
-    const rooms = new Map();
-    const messages = new Map();
-
-    function leaveRoom(socket, roomId) {
-        if (rooms.has(roomId)) {
-            const user = Array.from(rooms.get(roomId)).find(u => u.id === socket.id);
-            if (user) {
-                rooms.get(roomId).delete(user);
-                console.log(`User ${user.userName} left room ${roomId}`);
-                if (rooms.get(roomId).size === 0) {
-                    rooms.delete(roomId);
-                    messages.delete(roomId);
-                    console.log(`Room ${roomId} deleted as it's empty`);
-                } else {
-                    io.to(roomId).emit('user left', socket.id);
-                    io.to(roomId).emit('all users', Array.from(rooms.get(roomId)));
-                }
-            }
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"]
         }
-        socket.leave(roomId);
-    }
+    });
 
     io.on('connection', (socket) => {
         console.log('A user connected');
 
+        socket.on('check room', (roomId, callback) => {
+            console.log('Checking room:', roomId);
+            const roomExists = rooms.has(roomId);
+            console.log('Room exists:', roomExists);
+            callback(roomExists);
+        });
+
         socket.on('join room', ({ roomId, userName }) => {
             console.log(`User ${userName} joining room ${roomId}`);
             socket.join(roomId);
-            
+
             if (!rooms.has(roomId)) {
                 rooms.set(roomId, new Set());
             }
@@ -61,6 +72,7 @@ app.prepare().then(() => {
         });
 
         socket.on('leave room', ({ roomId }) => {
+            console.log(`User leaving room ${roomId}`);
             leaveRoom(socket, roomId);
         });
 

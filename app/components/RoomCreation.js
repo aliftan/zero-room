@@ -30,7 +30,7 @@ export default function RoomCreation() {
     const createRoom = () => {
         if (validateInputs()) {
             const roomId = uuidv4();
-            router.push(`/room/${roomId}?name=${encodeURIComponent(userName)}`);
+            router.push(`/room/${roomId}?name=${encodeURIComponent(userName)}&roomName=${encodeURIComponent(roomName)}`);
         }
     };
 
