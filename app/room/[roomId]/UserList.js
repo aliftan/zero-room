@@ -8,7 +8,7 @@ export default function UserList({ onlineUsers }) {
     };
 
     return (
-        <div className="w-64 bg-gray-800 p-4 overflow-y-auto">
+        <div className="w-64 bg-gray-800 p-4 overflow-y-auto border-r border-gray-700">
             <h2 className="text-lg font-semibold mb-4">Online ({onlineUsers.length})</h2>
             <div className="space-y-2">
                 {onlineUsers.map((user) => (

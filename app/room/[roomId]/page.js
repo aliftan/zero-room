@@ -137,7 +137,7 @@ export default function Room({ params }) {
                 handleDisconnect={handleDisconnect}
             />
 
-            <div className="flex flex-1 overflow-hidden">
+            <div className="flex flex-1 overflow-hidden border-t border-gray-700">
                 <UserList onlineUsers={onlineUsers} />
                 <RoomContent
                     socket={socket}

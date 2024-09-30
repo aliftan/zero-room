@@ -8,15 +8,17 @@
     "start": "NODE_ENV=production node server.js"
   },
   "dependencies": {
-    "express": "^4.17.1",
-    "next": "14.2.13",
+    "express": "^4.21.0",
+    "http": "^0.0.1-security",
+    "next": "^14.2.13",
     "react": "^18",
     "react-dom": "^18",
     "react-icons": "^5.3.0",
     "simple-peer": "^9.11.1",
     "socket.io": "^4.8.0",
     "socket.io-client": "^4.8.0",
-    "uuid": "^8.3.2"
+    "uuid": "^8.3.2",
+    "winston": "^3.14.2"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",

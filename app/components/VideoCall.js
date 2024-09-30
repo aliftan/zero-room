@@ -1,4 +1,3 @@
-'use client';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import Peer from 'simple-peer';
 
@@ -18,6 +17,8 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
     const userVideo = useRef();
     const peersRef = useRef([]);
     const streamRef = useRef();
+    const pingIntervalRef = useRef();
+    const checkPeersIntervalRef = useRef();
 
     const removePeer = useCallback((peerId) => {
         console.log('Removing peer:', peerId);
@@ -26,6 +27,41 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
         const peerToRemove = peersRef.current.find(p => p.peerID === peerId);
         if (peerToRemove && peerToRemove.peer) {
             peerToRemove.peer.destroy();
+        }
+    }, []);
+
+    const initializePingPong = useCallback(() => {
+        if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+        if (checkPeersIntervalRef.current) clearInterval(checkPeersIntervalRef.current);
+
+        pingIntervalRef.current = setInterval(() => {
+            peersRef.current.forEach(peerObj => {
+                if (peerObj.peer.connected) {
+                    peerObj.peer.send('__ping__');
+                    peerObj.lastPingSent = Date.now();
+                }
+            });
+        }, 5000);
+
+        checkPeersIntervalRef.current = setInterval(() => {
+            peersRef.current.forEach(peerObj => {
+                if (peerObj.lastPongReceived && Date.now() - peerObj.lastPongReceived > 15000) {
+                    console.log(`Peer ${peerObj.peerID} seems to be disconnected. Attempting to reconnect...`);
+                    removePeer(peerObj.peerID);
+                    // You might want to trigger a reconnection attempt here
+                }
+            });
+        }, 10000);
+    }, [removePeer]);
+
+    const handlePeerData = useCallback((peerObj, data) => {
+        const message = data.toString();
+        if (message === '__ping__') {
+            peerObj.peer.send('__pong__');
+        } else if (message === '__pong__') {
+            peerObj.lastPongReceived = Date.now();
+        } else {
+            console.log('Received data from peer:', message);
         }
     }, []);
 
@@ -38,7 +74,7 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
         });
 
         peer.on('signal', signal => {
-            console.log('Sending signal to:', userToSignal);
+            console.log('Sending signal to:', userToSignal, 'Signal:', signal);
             socket.emit('sending signal', { userToSignal, callerID, signal, userName });
         });
 
@@ -46,16 +82,18 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
             console.log('Peer connected:', userToSignal);
         });
 
+        peer.on('data', data => handlePeerData({ peer, peerID: userToSignal }, data));
+
         peer.on('error', error => {
             console.error('Peer error in createPeer:', error);
             removePeer(callerID);
         });
 
         return peer;
-    }, [socket, userName, removePeer]);
+    }, [socket, userName, removePeer, handlePeerData]);
 
     const addPeer = useCallback((incomingSignal, callerID, stream) => {
-        console.log('Adding peer for:', callerID);
+        console.log('Adding peer for:', callerID, 'Incoming signal:', incomingSignal);
         const peer = new Peer({
             initiator: false,
             trickle: false,
@@ -63,7 +101,7 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
         });
 
         peer.on('signal', signal => {
-            console.log('Returning signal to:', callerID);
+            console.log('Returning signal to:', callerID, 'Signal:', signal);
             socket.emit('returning signal', { signal, callerID });
         });
 
@@ -71,27 +109,29 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
             console.log('Peer connected:', callerID);
         });
 
+        peer.on('data', data => handlePeerData({ peer, peerID: callerID }, data));
+
         peer.on('error', error => {
             console.error('Peer error in addPeer:', error);
             removePeer(callerID);
         });
 
-        // Wrap the signaling in a try-catch block
-        try {
-            if (peer && typeof peer.signal === 'function') {
-                peer.signal(incomingSignal);
-            } else {
-                console.error('Peer object is not properly initialized');
+        setTimeout(() => {
+            try {
+                if (peer && typeof peer.signal === 'function' && incomingSignal) {
+                    peer.signal(incomingSignal);
+                } else {
+                    console.error('Peer object or incoming signal is not properly initialized');
+                    throw new Error('Invalid peer or signal');
+                }
+            } catch (error) {
+                console.error('Error signaling peer:', error);
                 removePeer(callerID);
             }
-        } catch (error) {
-            console.error('Error signaling peer:', error);
-            removePeer(callerID);
-        }
+        }, 100);
 
         return peer;
-    }, [socket, removePeer]);
-
+    }, [socket, removePeer, handlePeerData]);
 
     useEffect(() => {
         if (connectionStatus !== 'connected' || !socket) return;
@@ -146,8 +186,15 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
                 socket.on('receiving returned signal', payload => {
                     console.log('Received returned signal:', payload);
                     const item = peersRef.current.find(p => p.peerID === payload.id);
-                    if (item && item.peer) {
-                        item.peer.signal(payload.signal);
+                    if (item && item.peer && payload.signal) {
+                        try {
+                            item.peer.signal(payload.signal);
+                        } catch (error) {
+                            console.error('Error processing returned signal:', error);
+                            removePeer(payload.id);
+                        }
+                    } else {
+                        console.error('Invalid peer or signal in receiving returned signal');
                     }
                 });
 
@@ -160,6 +207,8 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
                     console.log('Room is full');
                     setError('The room is full. Cannot join.');
                 });
+
+                initializePingPong();
             } catch (error) {
                 console.error('Error accessing media devices:', error);
                 setError('Unable to access camera or microphone');
@@ -178,8 +227,10 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
             socket.off('user left');
             socket.off('room full');
             socket.emit('leave room', { roomId, userName });
+            if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
+            if (checkPeersIntervalRef.current) clearInterval(checkPeersIntervalRef.current);
         };
-    }, [socket, roomId, userName, createPeer, addPeer, removePeer, connectionStatus]);
+    }, [socket, roomId, userName, createPeer, addPeer, removePeer, connectionStatus, initializePingPong]);
 
     useEffect(() => {
         if (streamRef.current) {
@@ -204,10 +255,22 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
 
     return (
         <div className="relative h-full">
-            <div className={`grid gap-2 h-full ${peers.length > 0 ? 'grid-cols-2' : 'grid-cols-1'}`}>
-                <div className="relative">
-                    <video playsInline muted ref={userVideo} autoPlay className="w-full h-full object-cover rounded-lg" />
-                    <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
+            <div className={`grid gap-2 h-full ${
+                peers.length === 0 ? 'grid-cols-1' : 
+                peers.length === 1 ? 'grid-rows-2' :
+                'grid-cols-2'
+            }`}>
+                <div className="relative w-full h-full">
+                    <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                        <video
+                            playsInline
+                            muted
+                            ref={userVideo}
+                            autoPlay
+                            className="w-full h-full object-contain"
+                        />
+                    </div>
+                    <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white z-10">
                         {user ? user.userName : 'You'} {connectionStatus !== 'connected' && '(Disconnected)'}
                     </p>
                 </div>
@@ -215,7 +278,7 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus, 
                     <Video key={peerData.uniqueId} peer={peerData.peer} userName={peerData.userName} />
                 ))}
             </div>
-
+    
             <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2 flex justify-center space-x-4">
                 <button
                     onClick={toggleAudio}
@@ -264,19 +327,20 @@ const Video = ({ peer, userName }) => {
     }, [peer, userName]);
 
     return (
-        <div className="relative">
-            <video
-                playsInline
-                autoPlay
-                ref={ref}
-                className={`w-full h-full object-cover rounded-lg ${hasVideo ? '' : 'hidden'}`}
-            />
-            {!hasVideo && (
-                <div className="w-full h-full bg-gray-800 flex items-center justify-center rounded-lg">
+        <div className="relative w-full h-full">
+            <div className="absolute inset-0 flex items-center justify-center bg-gray-800">
+                {hasVideo ? (
+                    <video
+                        playsInline
+                        autoPlay
+                        ref={ref}
+                        className="w-full h-full object-contain"
+                    />
+                ) : (
                     <p className="text-white">Waiting for video from {userName}...</p>
-                </div>
-            )}
-            <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
+                )}
+            </div>
+            <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white z-10">
                 {userName}
             </p>
         </div>

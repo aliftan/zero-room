@@ -5,8 +5,8 @@ import { FaAngleLeft } from 'react-icons/fa';
 
 export default function RoomContent({ socket, roomId, userName, connectionStatus, isChatOpen, setIsChatOpen }) {
     return (
-        <div className="flex-1 flex">
-            <div className="flex-1">
+        <div className="flex-1 flex border-t border-gray-700">
+            <div className="flex-1 border-r border-gray-700">
                 {socket && <VideoCall
                     roomId={roomId}
                     userName={userName}
