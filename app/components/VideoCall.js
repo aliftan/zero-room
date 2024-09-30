@@ -10,7 +10,7 @@ const generateUniqueId = () => {
 
 const MAX_PEERS = 6;
 
-export default function VideoCall({ roomId, userName, socket, connectionStatus }) {
+export default function VideoCall({ roomId, userName, socket, connectionStatus, user }) {
     const [peers, setPeers] = useState([]);
     const [isMuted, setIsMuted] = useState(false);
     const [isVideoOff, setIsVideoOff] = useState(false);
@@ -19,47 +19,8 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
     const peersRef = useRef([]);
     const streamRef = useRef();
 
-    const createPeer = useCallback((userToSignal, callerID, stream) => {
-        const peer = new Peer({
-            initiator: true,
-            trickle: false,
-            stream,
-        });
-
-        peer.on('signal', signal => {
-            socket.emit('sending signal', { userToSignal, callerID, signal, userName });
-        });
-
-        peer.on('error', error => {
-            console.error('Peer error in createPeer:', error);
-            removePeer(callerID);
-        });
-
-        return peer;
-    }, [socket, userName]);
-
-    const addPeer = useCallback((incomingSignal, callerID, stream) => {
-        const peer = new Peer({
-            initiator: false,
-            trickle: false,
-            stream,
-        });
-
-        peer.on('signal', signal => {
-            socket.emit('returning signal', { signal, callerID });
-        });
-
-        peer.on('error', error => {
-            console.error('Peer error in addPeer:', error);
-            removePeer(callerID);
-        });
-
-        peer.signal(incomingSignal);
-
-        return peer;
-    }, [socket]);
-
     const removePeer = useCallback((peerId) => {
+        console.log('Removing peer:', peerId);
         setPeers(prevPeers => prevPeers.filter(p => p.peerID !== peerId));
         peersRef.current = peersRef.current.filter(p => p.peerID !== peerId);
         const peerToRemove = peersRef.current.find(p => p.peerID === peerId);
@@ -68,11 +29,76 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
         }
     }, []);
 
+    const createPeer = useCallback((userToSignal, callerID, stream) => {
+        console.log('Creating peer for:', userToSignal);
+        const peer = new Peer({
+            initiator: true,
+            trickle: false,
+            stream,
+        });
+
+        peer.on('signal', signal => {
+            console.log('Sending signal to:', userToSignal);
+            socket.emit('sending signal', { userToSignal, callerID, signal, userName });
+        });
+
+        peer.on('connect', () => {
+            console.log('Peer connected:', userToSignal);
+        });
+
+        peer.on('error', error => {
+            console.error('Peer error in createPeer:', error);
+            removePeer(callerID);
+        });
+
+        return peer;
+    }, [socket, userName, removePeer]);
+
+    const addPeer = useCallback((incomingSignal, callerID, stream) => {
+        console.log('Adding peer for:', callerID);
+        const peer = new Peer({
+            initiator: false,
+            trickle: false,
+            stream,
+        });
+
+        peer.on('signal', signal => {
+            console.log('Returning signal to:', callerID);
+            socket.emit('returning signal', { signal, callerID });
+        });
+
+        peer.on('connect', () => {
+            console.log('Peer connected:', callerID);
+        });
+
+        peer.on('error', error => {
+            console.error('Peer error in addPeer:', error);
+            removePeer(callerID);
+        });
+
+        // Wrap the signaling in a try-catch block
+        try {
+            if (peer && typeof peer.signal === 'function') {
+                peer.signal(incomingSignal);
+            } else {
+                console.error('Peer object is not properly initialized');
+                removePeer(callerID);
+            }
+        } catch (error) {
+            console.error('Error signaling peer:', error);
+            removePeer(callerID);
+        }
+
+        return peer;
+    }, [socket, removePeer]);
+
+
     useEffect(() => {
-        if (connectionStatus !== 'connected') return;
+        if (connectionStatus !== 'connected' || !socket) return;
 
         const setupMediaStream = async () => {
             try {
+                console.log('Setting up media stream');
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
                 streamRef.current = stream;
                 if (userVideo.current) {
@@ -82,9 +108,10 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                 socket.emit('join room', { roomId, userName });
 
                 socket.on('all users', users => {
+                    console.log('Received all users:', users);
                     const peers = [];
                     users.forEach(user => {
-                        if (peers.length < MAX_PEERS - 1) {
+                        if (peers.length < MAX_PEERS - 1 && user.id !== socket.id) {
                             const peer = createPeer(user.id, socket.id, stream);
                             const peerObj = {
                                 peerID: user.id,
@@ -100,7 +127,8 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                 });
 
                 socket.on('user joined', payload => {
-                    if (peersRef.current.length < MAX_PEERS - 1) {
+                    console.log('User joined:', payload);
+                    if (peersRef.current.length < MAX_PEERS - 1 && payload.callerID !== socket.id) {
                         const peer = addPeer(payload.signal, payload.callerID, stream);
                         const peerObj = {
                             peerID: payload.callerID,
@@ -111,11 +139,12 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                         peersRef.current.push(peerObj);
                         setPeers(prevPeers => [...prevPeers, peerObj]);
                     } else {
-                        console.warn('Maximum number of peers reached. Cannot add new peer.');
+                        console.warn('Maximum number of peers reached or self-connection attempted. Cannot add new peer.');
                     }
                 });
 
                 socket.on('receiving returned signal', payload => {
+                    console.log('Received returned signal:', payload);
                     const item = peersRef.current.find(p => p.peerID === payload.id);
                     if (item && item.peer) {
                         item.peer.signal(payload.signal);
@@ -123,10 +152,12 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                 });
 
                 socket.on('user left', userId => {
+                    console.log('User left:', userId);
                     removePeer(userId);
                 });
 
                 socket.on('room full', () => {
+                    console.log('Room is full');
                     setError('The room is full. Cannot join.');
                 });
             } catch (error) {
@@ -138,6 +169,7 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
         setupMediaStream();
 
         return () => {
+            console.log('Cleaning up VideoCall component');
             streamRef.current?.getTracks().forEach(track => track.stop());
             peersRef.current.forEach(({ peer }) => peer.destroy());
             socket.off('all users');
@@ -176,7 +208,7 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
                 <div className="relative">
                     <video playsInline muted ref={userVideo} autoPlay className="w-full h-full object-cover rounded-lg" />
                     <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
-                        You {connectionStatus !== 'connected' && '(Disconnected)'}
+                        {user ? user.userName : 'You'} {connectionStatus !== 'connected' && '(Disconnected)'}
                     </p>
                 </div>
                 {peers.map((peerData) => (
@@ -206,16 +238,44 @@ export default function VideoCall({ roomId, userName, socket, connectionStatus }
 
 const Video = ({ peer, userName }) => {
     const ref = useRef();
+    const [hasVideo, setHasVideo] = useState(false);
 
     useEffect(() => {
         peer.on('stream', stream => {
-            ref.current.srcObject = stream;
+            console.log('Received stream for peer:', userName);
+            if (ref.current) {
+                ref.current.srcObject = stream;
+                setHasVideo(stream.getVideoTracks().length > 0);
+            }
         });
-    }, [peer]);
+
+        peer.on('error', error => {
+            console.error('Peer connection error:', error);
+            setHasVideo(false);
+        });
+
+        peer.on('connect', () => {
+            console.log('Peer connection established for:', userName);
+        });
+
+        return () => {
+            peer.destroy();
+        };
+    }, [peer, userName]);
 
     return (
         <div className="relative">
-            <video playsInline autoPlay ref={ref} className="w-full h-full object-cover rounded-lg" />
+            <video
+                playsInline
+                autoPlay
+                ref={ref}
+                className={`w-full h-full object-cover rounded-lg ${hasVideo ? '' : 'hidden'}`}
+            />
+            {!hasVideo && (
+                <div className="w-full h-full bg-gray-800 flex items-center justify-center rounded-lg">
+                    <p className="text-white">Waiting for video from {userName}...</p>
+                </div>
+            )}
             <p className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-white">
                 {userName}
             </p>

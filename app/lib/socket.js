@@ -1,6 +1,7 @@
 import { io } from 'socket.io-client';
 
 let socket;
+let heartbeatInterval;
 
 export const initSocket = () => {
     return new Promise((resolve, reject) => {
@@ -19,6 +20,7 @@ export const initSocket = () => {
             transports: ['websocket'],
             reconnectionAttempts: 5,
             timeout: 10000,
+            autoConnect: false,
         });
 
         socket.on('connect', () => {
@@ -37,7 +39,14 @@ export const initSocket = () => {
 
         socket.on('disconnect', (reason) => {
             console.log('Socket disconnected:', reason);
+            if (reason === 'io server disconnect') {
+                // the disconnection was initiated by the server, you need to reconnect manually
+                socket.connect();
+            }
+            stopHeartbeat();
         });
+
+        socket.connect();
     });
 };
 
@@ -46,4 +55,48 @@ export const getSocket = () => {
         throw new Error('Socket not initialized. Call initSocket() first.');
     }
     return socket;
+};
+
+export const disconnectSocket = () => {
+    if (socket) {
+        stopHeartbeat();
+        socket.disconnect();
+        socket = null;
+    }
+};
+
+export const startHeartbeat = (roomId) => {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+    }
+    heartbeatInterval = setInterval(() => {
+        if (socket && socket.connected) {
+            socket.emit('heartbeat', { roomId });
+        }
+    }, 30000); // Send heartbeat every 30 seconds
+};
+
+export const stopHeartbeat = () => {
+    if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+    }
+};
+
+export const joinRoom = (roomData) => {
+    if (socket && socket.connected) {
+        socket.emit('join room', roomData);
+        startHeartbeat(roomData.roomId);
+    } else {
+        console.error('Socket not connected. Cannot join room.');
+    }
+};
+
+export const leaveRoom = (roomData) => {
+    if (socket && socket.connected) {
+        socket.emit('leave room', roomData);
+        stopHeartbeat();
+    } else {
+        console.error('Socket not connected. Cannot leave room.');
+    }
 };
